@@ -44,6 +44,10 @@ def main() -> int:
         accounts = load_accounts()
         if not accounts:
             print("accounts.txt пустой. Добавь аккаунты и оставь скрипт запущенным.")
+        elif debug:
+            print("[debug] проверяем аккаунты:")
+            for address, _ in accounts:
+                print(f"[debug] - {address}")
         cycle_codes = 0
         for address, password in accounts:
             cycle_codes += scan_account(address, password, seen, started_from, debug)
@@ -196,17 +200,14 @@ def request_api(
 
 
 def message_text(message: dict[str, Any]) -> str:
-    html_body = message.get("html")
-    if isinstance(html_body, list):
-        html_text = "\n".join(str(part) for part in html_body)
-    else:
-        html_text = str(html_body or "")
     return "\n".join(
         [
-            str(message.get("subject") or ""),
-            str(message.get("intro") or ""),
-            str(message.get("text") or ""),
-            html_text,
+            stringify_message_field(message.get("subject")),
+            stringify_message_field(message.get("intro")),
+            stringify_message_field(message.get("text")),
+            stringify_message_field(message.get("html")),
+            stringify_message_field(message.get("data")),
+            stringify_message_field(message.get("body")),
         ]
     )
 
@@ -257,6 +258,18 @@ def add_code(code: str, codes: list[str], seen_codes: set[str]) -> None:
 
 def is_css_hex_color(text: str, start: int) -> bool:
     return start > 0 and text[start - 1] == "#"
+
+
+def stringify_message_field(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return "\n".join(stringify_message_field(item) for item in value)
+    if isinstance(value, dict):
+        return "\n".join(stringify_message_field(item) for item in value.values())
+    return str(value)
 
 
 def parse_mailtm_datetime(value: Any) -> datetime | None:
