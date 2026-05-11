@@ -31,14 +31,16 @@ def main() -> int:
     print("Остановить: Ctrl+C")
     print()
 
-    seen: set[str] = set()
     started_from = datetime.now(timezone.utc) - timedelta(seconds=START_LOOKBACK_SECONDS)
+    seen: set[str] = set()
     while True:
         accounts = load_accounts()
         if not accounts:
             print("accounts.txt пустой. Добавь аккаунты и оставь скрипт запущенным.")
+        cycle_codes = 0
         for address, password in accounts:
-            scan_account(address, password, seen, started_from)
+            cycle_codes += scan_account(address, password, seen, started_from)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] проверено аккаунтов: {len(accounts)}, новых кодов: {cycle_codes}")
         time.sleep(SCAN_EVERY_SECONDS)
 
 
@@ -72,7 +74,7 @@ def load_accounts() -> list[tuple[str, str]]:
     return accounts
 
 
-def scan_account(address: str, password: str, seen: set[str], started_from: datetime) -> None:
+def scan_account(address: str, password: str, seen: set[str], started_from: datetime) -> int:
     try:
         token = login(address, password)
         messages_response = request_api("/messages", token)
@@ -82,20 +84,21 @@ def scan_account(address: str, password: str, seen: set[str], started_from: date
             messages = messages_response.get("hydra:member", [])
         else:
             print(f"{address}: mail.tm вернул неожиданный список писем")
-            return
+            return 0
         if not isinstance(messages, list):
             print(f"{address}: mail.tm вернул неожиданный список писем")
-            return
+            return 0
+        found_codes = 0
         for message in messages[:MESSAGES_PER_ACCOUNT]:
             if not isinstance(message, dict):
                 continue
             message_id = str(message.get("id") or "")
             if not message_id:
                 continue
-            created_at = parse_mailtm_datetime(message.get("createdAt"))
-            if created_at is None or created_at < started_from:
-                continue
             full_message = request_dict(f"/messages/{urllib.parse.quote(message_id)}", token)
+            created_at = parse_message_datetime(message, full_message)
+            if created_at is not None and created_at < started_from:
+                continue
             codes = extract_codes(message_text(full_message))
             if not codes:
                 continue
@@ -105,8 +108,11 @@ def scan_account(address: str, password: str, seen: set[str], started_from: date
             seen.add(dedupe_key)
             for code in codes:
                 print(f"{address}: {code}")
+                found_codes += 1
+        return found_codes
     except MailTmError as error:
         print(f"{address}: ошибка — {error}")
+        return 0
 
 
 def login(address: str, password: str) -> str:
@@ -217,6 +223,17 @@ def parse_mailtm_datetime(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def parse_message_datetime(summary: dict[str, Any], full_message: dict[str, Any]) -> datetime | None:
+    for key in ("createdAt", "created_at", "updatedAt", "updated_at"):
+        parsed = parse_mailtm_datetime(summary.get(key))
+        if parsed is not None:
+            return parsed
+        parsed = parse_mailtm_datetime(full_message.get(key))
+        if parsed is not None:
+            return parsed
+    return None
 
 
 class MailTmError(RuntimeError):
