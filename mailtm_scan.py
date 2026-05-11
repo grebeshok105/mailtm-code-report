@@ -9,6 +9,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, cast
 
@@ -16,11 +17,8 @@ ACCOUNTS_FILE = Path("accounts.txt")
 API_BASE_URL = "https://api.mail.tm"
 SCAN_EVERY_SECONDS = 15
 MESSAGES_PER_ACCOUNT = 10
-CODE_PATTERN = re.compile(r"(?<![A-Z0-9])(?:\d{4,8}|[A-Z0-9]{6,10})(?![A-Z0-9])", re.IGNORECASE)
-CODE_CONTEXT_PATTERN = re.compile(
-    r"(code|код|verification|verify|confirm|confirmation|otp|парол|подтвержд)",
-    re.IGNORECASE,
-)
+START_LOOKBACK_SECONDS = 30
+CODE_PATTERN = re.compile(r"(?<!\d)\d{6}(?!\d)")
 TAG_PATTERN = re.compile(r"<[^>]+>")
 
 
@@ -29,16 +27,18 @@ def main() -> int:
     print("mail.tm code scanner")
     print(f"Аккаунты: {ACCOUNTS_FILE.resolve()}")
     print("Формат строк: email@domain:password")
+    print("Показывает только новые 6-значные коды.")
     print("Остановить: Ctrl+C")
     print()
 
     seen: set[str] = set()
+    started_from = datetime.now(timezone.utc) - timedelta(seconds=START_LOOKBACK_SECONDS)
     while True:
         accounts = load_accounts()
         if not accounts:
             print("accounts.txt пустой. Добавь аккаунты и оставь скрипт запущенным.")
         for address, password in accounts:
-            scan_account(address, password, seen)
+            scan_account(address, password, seen, started_from)
         time.sleep(SCAN_EVERY_SECONDS)
 
 
@@ -72,7 +72,7 @@ def load_accounts() -> list[tuple[str, str]]:
     return accounts
 
 
-def scan_account(address: str, password: str, seen: set[str]) -> None:
+def scan_account(address: str, password: str, seen: set[str], started_from: datetime) -> None:
     try:
         token = login(address, password)
         messages_response = request_api("/messages", token)
@@ -86,37 +86,25 @@ def scan_account(address: str, password: str, seen: set[str]) -> None:
         if not isinstance(messages, list):
             print(f"{address}: mail.tm вернул неожиданный список писем")
             return
-        found_any = False
         for message in messages[:MESSAGES_PER_ACCOUNT]:
             if not isinstance(message, dict):
                 continue
             message_id = str(message.get("id") or "")
             if not message_id:
                 continue
+            created_at = parse_mailtm_datetime(message.get("createdAt"))
+            if created_at is None or created_at < started_from:
+                continue
             full_message = request_dict(f"/messages/{urllib.parse.quote(message_id)}", token)
             codes = extract_codes(message_text(full_message))
             if not codes:
                 continue
-            found_any = True
             dedupe_key = f"{address}:{message_id}:{','.join(codes)}"
             if dedupe_key in seen:
                 continue
             seen.add(dedupe_key)
-            subject = str(full_message.get("subject") or "(без темы)")
-            sender = full_message.get("from")
-            from_address = ""
-            if isinstance(sender, dict):
-                from_address = str(sender.get("address") or "")
-            print()
-            print("=" * 60)
-            print(f"АККАУНТ: {address}")
-            print(f"КОДЫ: {', '.join(codes)}")
-            print(f"ТЕМА: {subject}")
-            print(f"ОТ: {from_address or 'unknown'}")
-            print("=" * 60)
-            print()
-        if not found_any:
-            print(f"{address}: кодов нет")
+            for code in codes:
+                print(f"{address}: {code}")
     except MailTmError as error:
         print(f"{address}: ошибка — {error}")
 
@@ -201,22 +189,13 @@ def message_text(message: dict[str, Any]) -> str:
 
 def extract_codes(raw_text: str) -> list[str]:
     text = normalize_text(raw_text)
-    candidates: list[tuple[int, str]] = []
-    for match in CODE_PATTERN.finditer(text):
-        code = match.group(0).strip()
-        if not code or code.lower() in {"mailtm", "mailto"}:
-            continue
-        window = text[max(0, match.start() - 80) : min(len(text), match.end() + 80)]
-        priority = 0 if CODE_CONTEXT_PATTERN.search(window) else 1
-        candidates.append((priority, code))
-
     codes: list[str] = []
     seen_codes: set[str] = set()
-    for _, code in sorted(candidates, key=lambda item: item[0]):
-        normalized = code.upper()
-        if normalized in seen_codes:
+    for match in CODE_PATTERN.finditer(text):
+        code = match.group(0)
+        if code in seen_codes:
             continue
-        seen_codes.add(normalized)
+        seen_codes.add(code)
         codes.append(code)
     return codes
 
@@ -225,6 +204,19 @@ def normalize_text(raw_text: str) -> str:
     without_tags = TAG_PATTERN.sub(" ", raw_text)
     unescaped = html.unescape(without_tags)
     return re.sub(r"\s+", " ", unescaped).strip()
+
+
+def parse_mailtm_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    normalized = value.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 class MailTmError(RuntimeError):
