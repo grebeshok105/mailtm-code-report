@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Local mail.tm credentials.
+accounts.json
+accounts.txt
+*.secrets.json
+.env
+.env.*
+!.env.example
