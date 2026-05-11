@@ -215,6 +215,8 @@ def extract_codes(raw_text: str) -> list[str]:
     text = normalize_text(raw_text)
     candidates: list[tuple[int, str]] = []
     for match in OLD_WORKING_CODE_PATTERN.finditer(text):
+        if is_css_hex_color(text, match.start()):
+            continue
         candidate = match.group(0).strip()
         digit_code = re.sub(r"\D", "", candidate)
         if len(digit_code) != 6:
@@ -223,7 +225,15 @@ def extract_codes(raw_text: str) -> list[str]:
         priority = 0 if CODE_CONTEXT_PATTERN.search(window) else 1
         candidates.append((priority, digit_code))
     for match in COMPACT_CODE_PATTERN.finditer(text):
-        candidates.append((1, match.group(0)))
+        if is_css_hex_color(text, match.start()):
+            continue
+        window = text[max(0, match.start() - 80) : min(len(text), match.end() + 80)]
+        priority = 0 if CODE_CONTEXT_PATTERN.search(window) else 1
+        candidates.append((priority, match.group(0)))
+
+    context_codes = [code for priority, code in candidates if priority == 0]
+    if context_codes:
+        candidates = [(0, code) for code in context_codes]
 
     codes: list[str] = []
     seen_codes: set[str] = set()
@@ -243,6 +253,10 @@ def add_code(code: str, codes: list[str], seen_codes: set[str]) -> None:
         return
     seen_codes.add(code)
     codes.append(code)
+
+
+def is_css_hex_color(text: str, start: int) -> bool:
+    return start > 0 and text[start - 1] == "#"
 
 
 def parse_mailtm_datetime(value: Any) -> datetime | None:
