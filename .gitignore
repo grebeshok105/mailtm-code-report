@@ -10,6 +10,7 @@ build/
 
 # Local mail.tm credentials.
 accounts.json
+accounts.txt
 *.secrets.json
 .env
 .env.*

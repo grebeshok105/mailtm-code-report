@@ -32,7 +32,12 @@ class AccountScanResult:
 
 
 def load_accounts(path: str | Path) -> list[AccountCredentials]:
-    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    account_path = Path(path)
+    raw_content = account_path.read_text(encoding="utf-8")
+    if account_path.suffix.lower() == ".txt":
+        return load_accounts_text(raw_content)
+
+    payload = json.loads(raw_content)
     items = payload.get("accounts") if isinstance(payload, dict) else payload
     if not isinstance(items, list):
         raise ValueError("Accounts file must contain a list or an object with an accounts list")
@@ -45,6 +50,23 @@ def load_accounts(path: str | Path) -> list[AccountCredentials]:
         password = item.get("password")
         if not isinstance(address, str) or not isinstance(password, str) or not address or not password:
             raise ValueError("Each account must have non-empty address and password fields")
+        accounts.append(AccountCredentials(address=address, password=password))
+    return accounts
+
+
+def load_accounts_text(raw_content: str) -> list[AccountCredentials]:
+    accounts: list[AccountCredentials] = []
+    for line_number, raw_line in enumerate(raw_content.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if ":" not in line:
+            raise ValueError(f"Line {line_number}: expected email:password")
+        address, password = line.split(":", 1)
+        address = address.strip()
+        password = password.strip()
+        if not address or not password:
+            raise ValueError(f"Line {line_number}: email and password must be non-empty")
         accounts.append(AccountCredentials(address=address, password=password))
     return accounts
 

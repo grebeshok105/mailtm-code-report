@@ -19,10 +19,19 @@
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .
-cp accounts.example.json accounts.json
+cp accounts.example.txt accounts.txt
 ```
 
-Заполните `accounts.json`:
+Заполните `accounts.txt`, по одному аккаунту на строку:
+
+```text
+email@domain.mail.tm:password
+second@domain.mail.tm:another-password
+```
+
+Пароль может содержать `:`, деление идёт по первому двоеточию.
+
+Также поддерживается JSON-формат. Если удобнее, создайте `accounts.json`:
 
 ```json
 {
@@ -35,12 +44,12 @@ cp accounts.example.json accounts.json
 }
 ```
 
-`accounts.json` добавлен в `.gitignore`, потому что содержит пароли.
+`accounts.txt` и `accounts.json` добавлены в `.gitignore`, потому что содержат пароли.
 
 ## CLI-анализ
 
 ```bash
-mailtm-code-report scan --accounts accounts.json
+mailtm-code-report scan --accounts accounts.txt
 ```
 
 Только последние N писем каждого аккаунта:
@@ -58,7 +67,7 @@ mailtm-code-report scan --code-regex '(?<!\d)\d{6}(?!\d)'
 ## Веб-интерфейс с кнопкой
 
 ```bash
-mailtm-code-report server --host 127.0.0.1 --port 8000
+mailtm-code-report server --accounts accounts.txt --host 127.0.0.1 --port 8000
 ```
 
 Откройте `http://127.0.0.1:8000` и нажмите **Анализировать аккаунты**.

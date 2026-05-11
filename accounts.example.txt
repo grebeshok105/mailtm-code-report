@@ -1,0 +1,3 @@
+# One mail.tm account per line:
+# email:password
+example@domain.mail.tm:change-me
