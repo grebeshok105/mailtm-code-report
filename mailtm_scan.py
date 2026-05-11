@@ -10,7 +10,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 ACCOUNTS_FILE = Path("accounts.txt")
 API_BASE_URL = "https://api.mail.tm"
@@ -75,7 +75,14 @@ def load_accounts() -> list[tuple[str, str]]:
 def scan_account(address: str, password: str, seen: set[str]) -> None:
     try:
         token = login(address, password)
-        messages = request_json("/messages", token).get("hydra:member", [])
+        messages_response = request_api("/messages", token)
+        if isinstance(messages_response, list):
+            messages = messages_response
+        elif isinstance(messages_response, dict):
+            messages = messages_response.get("hydra:member", [])
+        else:
+            print(f"{address}: mail.tm вернул неожиданный список писем")
+            return
         if not isinstance(messages, list):
             print(f"{address}: mail.tm вернул неожиданный список писем")
             return
@@ -86,7 +93,7 @@ def scan_account(address: str, password: str, seen: set[str]) -> None:
             message_id = str(message.get("id") or "")
             if not message_id:
                 continue
-            full_message = request_json(f"/messages/{urllib.parse.quote(message_id)}", token)
+            full_message = request_dict(f"/messages/{urllib.parse.quote(message_id)}", token)
             codes = extract_codes(message_text(full_message))
             if not codes:
                 continue
@@ -115,7 +122,7 @@ def scan_account(address: str, password: str, seen: set[str]) -> None:
 
 
 def login(address: str, password: str) -> str:
-    response = request_json(
+    response = request_dict(
         "/token",
         None,
         method="POST",
@@ -127,13 +134,26 @@ def login(address: str, password: str) -> str:
     return token
 
 
-def request_json(
+def request_dict(
     path: str,
     token: str | None,
     *,
     method: str = "GET",
     payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    parsed = request_api(path, token, method=method, payload=payload)
+    if not isinstance(parsed, dict):
+        raise MailTmError(f"{path}: ожидался JSON object, получен {type(parsed).__name__}")
+    return parsed
+
+
+def request_api(
+    path: str,
+    token: str | None,
+    *,
+    method: str = "GET",
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any] | list[Any]:
     url = f"{API_BASE_URL}{path}"
     body = None
     headers = {"Accept": "application/json"}
@@ -153,10 +173,14 @@ def request_json(
     except urllib.error.URLError as error:
         raise MailTmError(str(error.reason)) from error
 
-    parsed = json.loads(raw) if raw else {}
-    if not isinstance(parsed, dict):
-        raise MailTmError("API вернул не JSON object")
-    return parsed
+    try:
+        parsed = json.loads(raw) if raw else {}
+    except json.JSONDecodeError as error:
+        short_raw = raw[:200].replace("\n", " ")
+        raise MailTmError(f"{path}: API вернул не JSON: {short_raw}") from error
+    if not isinstance(parsed, (dict, list)):
+        raise MailTmError(f"{path}: API вернул JSON {type(parsed).__name__}")
+    return cast(dict[str, Any] | list[Any], parsed)
 
 
 def message_text(message: dict[str, Any]) -> str:
