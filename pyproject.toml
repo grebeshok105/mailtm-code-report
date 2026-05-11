@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mailtm-code-report"
+version = "0.1.0"
+description = "Scan existing mail.tm accounts and report verification codes."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = []
+
+[project.scripts]
+mailtm-code-report = "mailtm_code_report.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

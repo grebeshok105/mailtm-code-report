@@ -1,0 +1,8 @@
+{
+  "accounts": [
+    {
+      "address": "example@domain.mail.tm",
+      "password": "change-me"
+    }
+  ]
+}
